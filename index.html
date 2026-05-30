@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Compte rendu de reunion depuis un audio</title>
+<!-- Generation .docx cote navigateur (aucun serveur) -->
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+<style>
+  :root {
+    --accent: #AD1D89;
+    --accent-soft: #f5f0f4;
+    --text: #1e1e1e;
+    --muted: #6b6b6b;
+    --border: #e2e2e2;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--text);
+    background: #ffffff;
+    line-height: 1.5;
+  }
+  .layout { display: flex; min-height: 100vh; }
+  aside {
+    width: 320px;
+    flex-shrink: 0;
+    background: var(--accent-soft);
+    border-right: 1px solid var(--border);
+    padding: 24px 20px;
+  }
+  main { flex: 1; padding: 32px 40px; max-width: 860px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 32px 0 10px; color: var(--accent); }
+  aside h2 { color: var(--text); font-size: 16px; margin-top: 22px; }
+  .lead { color: var(--muted); margin-top: 0; }
+  label { display: block; font-weight: 600; font-size: 14px; margin: 14px 0 4px; }
+  input[type="text"], input[type="password"], input[type="date"], select, textarea {
+    width: 100%;
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    background: #fff;
+  }
+  textarea { resize: vertical; }
+  button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 12px;
+  }
+  button.secondary { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .step { border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; margin-top: 20px; }
+  .step.disabled { opacity: 0.45; pointer-events: none; }
+  .caption { color: var(--muted); font-size: 13px; }
+  .seg { padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
+  .seg .who { color: var(--accent); font-weight: 700; font-size: 14px; }
+  .seg .ts { color: var(--muted); font-size: 12px; }
+  .name-row { display: grid; grid-template-columns: 160px 1fr; gap: 10px; align-items: center; margin: 6px 0; }
+  .msg { padding: 12px 14px; border-radius: 8px; font-size: 14px; margin-top: 14px; }
+  .msg.info { background: #eef4fb; color: #1c4e80; }
+  .msg.warn { background: #fdf3e7; color: #8a5a12; }
+  .msg.error { background: #fbecec; color: #9b2222; }
+  .msg.ok { background: #ecf7ed; color: #1f6b2c; }
+  .spinner { display: none; font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .spinner.on { display: block; }
+  table.preview { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 13px; }
+  table.preview th, table.preview td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; }
+  table.preview th { background: var(--accent); color: #fff; }
+  .hidden { display: none; }
+  .dl { display: inline-block; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <h2>Configuration</h2>
+    <label for="apiKey">Cle API Mistral</label>
+    <input type="password" id="apiKey" placeholder="Collez votre cle ici" autocomplete="off" />
+    <p class="caption">Votre cle reste dans votre navigateur. Elle n'est ni stockee, ni journalisee, ni envoyee ailleurs qu'a l'API Mistral.</p>
+
+    <label for="lang">Langue de l'audio</label>
+    <select id="lang">
+      <option value="fr" selected>Francais</option>
+      <option value="en">Anglais</option>
+      <option value="">Detection automatique</option>
+    </select>
+
+    <label for="chatModel">Modele de chat</label>
+    <select id="chatModel">
+      <option value="mistral-large-latest" selected>mistral-large-latest</option>
+      <option value="mistral-medium-latest">mistral-medium-latest</option>
+      <option value="mistral-small-latest">mistral-small-latest</option>
+    </select>
+
+    <h2>Confidentialite</h2>
+    <p class="caption">
+      Aucune donnee n'est stockee. Les fichiers audio, transcripts et comptes rendus
+      existent uniquement le temps de la session, dans votre navigateur. Telechargez
+      vos resultats pour les conserver. L'audio est transmis a l'API Mistral pour la
+      transcription. Ne traitez pas de donnees sensibles sans validation interne.
+    </p>
+  </aside>
+
+  <main>
+    <h1>Compte rendu de reunion depuis un audio</h1>
+    <p class="lead">Transformez un enregistrement de reunion en transcript, puis, si vous le souhaitez, en compte rendu professionnel telechargeable.</p>
+
+    <div id="needKey" class="msg info">
+      Pour commencer, saisissez votre cle API Mistral dans la barre laterale. Tant que la cle n'est pas fournie, les etapes restent desactivees.
+    </div>
+
+    <!-- Etape 1 -->
+    <section class="step disabled" id="step1">
+      <h2>1. Deposez votre enregistrement</h2>
+      <p class="caption">Formats audio acceptes : mp3, wav, m4a, flac, ogg. (Version web : audio uniquement, pas de conversion video.)</p>
+      <input type="file" id="audioFile" accept=".mp3,.wav,.m4a,.flac,.ogg,audio/*" />
+      <br /><button id="btnTranscribe">Lancer la transcription</button>
+      <div class="spinner" id="spinTranscribe">Transcription et identification des locuteurs en cours...</div>
+      <div id="msgTranscribe"></div>
+    </section>
+
+    <!-- Etape 2 -->
+    <section class="step disabled" id="step2">
+      <h2>2. Transcript</h2>
+      <p class="caption">La qualite de l'identification des locuteurs depend de l'enregistrement. Vous pourrez corriger les noms ci-dessous.</p>
+      <div id="transcriptView"></div>
+    </section>
+
+    <!-- Etape 3 -->
+    <section class="step disabled" id="step3">
+      <h2>3. Identifiez les locuteurs</h2>
+      <button id="btnIdentify" class="secondary">Identifier les locuteurs (IA)</button>
+      <div class="spinner" id="spinIdentify">Detection des noms par l'IA...</div>
+      <div id="msgIdentify"></div>
+      <div id="nameEditor"></div>
+      <button id="btnApplyNames">Appliquer les noms</button>
+    </section>
+
+    <!-- Etape 4 -->
+    <section class="step disabled" id="step4">
+      <h2>4. Relisez, corrigez et exportez le transcript</h2>
+      <p class="caption">Format attendu par ligne : "Nom du locuteur: texte de la prise de parole".</p>
+      <textarea id="transcriptEditor" rows="12"></textarea>
+      <br /><button id="btnDownloadMd" class="secondary">Telecharger le transcript (.md)</button>
+      <div class="msg info">Si vous souhaitez uniquement le transcript, vous avez tout ce qu'il faut. La generation d'un compte rendu ci-dessous est optionnelle.</div>
+    </section>
+
+    <!-- Etape 5 -->
+    <section class="step disabled" id="step5">
+      <h2>5. Generer un compte rendu structure (optionnel)</h2>
+      <p class="caption">Certaines personnes se contenteront du transcript. Cette etape est facultative.</p>
+      <label for="metaObjet">Objet de la reunion</label>
+      <input type="text" id="metaObjet" />
+      <label for="metaDate">Date de la reunion</label>
+      <input type="date" id="metaDate" />
+      <label for="metaParticipants">Participants (un par ligne)</label>
+      <textarea id="metaParticipants" rows="4"></textarea>
+      <label for="metaRedacteur">Redacteur ou redactrice</label>
+      <input type="text" id="metaRedacteur" />
+      <label for="metaSousTitre">Sous-titre institutionnel</label>
+      <input type="text" id="metaSousTitre" value="Institut Mines-Telecom Business School" />
+      <br /><button id="btnReport">Generer le compte rendu</button>
+      <div class="spinner" id="spinReport">Redaction du compte rendu par l'IA...</div>
+      <div id="msgReport"></div>
+      <div id="reportPreview"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+"use strict";
+
+const API_BASE = "https://api.mistral.ai/v1";
+const TRANSCRIBE_MODEL = "voxtral-mini-2602";
+const ACCENT = "AD1D89";
+const HEADER_INSTITUTION = "Institut Mines-Telecom Business School";
+const FOOTER_TEXT = "Institut Mines-Telecom Business School  |  9, rue Charles Fourier, 91011 Evry-Courcouronnes  |  www.imt-bs.eu";
+
+// Etat applicatif (vit uniquement en memoire / session du navigateur)
+const state = {
+  segments: null,
+  nameMapping: null,
+  report: null,
+  reportObjet: "",
+};
+
+const $ = (id) => document.getElementById(id);
+
+// ----------------------------- Utilitaires -----------------------------
+
+function apiKey() { return $("apiKey").value.trim(); }
+
+function pad2(n) { return String(n).padStart(2, "0"); }
+
+function formatTimestamp(seconds) {
+  const total = Math.round(seconds || 0);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+}
+
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+function todayFR() {
+  const d = new Date();
+  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+function todayCompact() {
+  const d = new Date();
+  return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}`;
+}
+
+function slugify(value) {
+  return (value || "")
+    .normalize("NFKD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase() || "reunion";
+}
+
+function showMsg(elId, type, text) {
+  const el = $(elId);
+  el.innerHTML = text ? `<div class="msg ${type}">${text}</div>` : "";
+}
+
+function humanizeError(err) {
+  const m = (err && err.message ? err.message : String(err)).toLowerCase();
+  if (m.includes("401") || m.includes("unauthorized") || m.includes("invalid api key"))
+    return "La cle API Mistral semble invalide ou expiree. Verifiez la cle saisie dans la barre laterale.";
+  if (m.includes("429") || m.includes("rate limit") || m.includes("quota") || m.includes("capacity"))
+    return "Quota ou limite de debit Mistral atteint. Patientez quelques instants puis reessayez.";
+  if (m.includes("failed to fetch") || m.includes("network") || m.includes("timeout"))
+    return "Probleme de connexion au service Mistral. Verifiez votre reseau puis reessayez.";
+  if (m.includes("413") || m.includes("too large"))
+    return "Le fichier est trop volumineux pour l'API. Reduisez la duree ou la taille de l'enregistrement.";
+  return "Une erreur est survenue lors de l'appel a Mistral : " + (err.message || err);
+}
+
+function setStepEnabled(id, enabled) {
+  $(id).classList.toggle("disabled", !enabled);
+}
+
+// ----------------------------- Appels API -----------------------------
+
+async function callTranscription(file, language) {
+  const fd = new FormData();
+  fd.append("file", file, file.name);
+  fd.append("model", TRANSCRIBE_MODEL);
+  if (language) fd.append("language", language);
+  fd.append("diarize", "true");
+  fd.append("timestamp_granularities", "segment");
+
+  const res = await fetch(`${API_BASE}/audio/transcriptions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey()}` },
+    body: fd,
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${detail}`);
+  }
+  return res.json();
+}
+
+async function callChat(messages, model, jsonMode) {
+  const body = { model, messages, temperature: jsonMode ? 0.2 : 0.3 };
+  if (jsonMode) body.response_format = { type: "json_object" };
+  const res = await fetch(`${API_BASE}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${detail}`);
+  }
+  const data = await res.json();
+  return data.choices[0].message.content;
+}
+
+// ----------------------------- Normalisation -----------------------------
+
+function pick(obj, keys, def) {
+  for (const k of keys) if (obj && obj[k] !== undefined && obj[k] !== null) return obj[k];
+  return def;
+}
+
+function normalizeSegments(data) {
+  let raw = pick(data, ["segments", "chunks", "results"], null);
+  if (!Array.isArray(raw) || raw.length === 0) {
+    const text = pick(data, ["text"], "") || "";
+    if (!text.trim()) throw new Error("La transcription n'a renvoye aucun contenu exploitable.");
+    return [{ speaker: "Participant 1", start: 0, end: 0, text: text.trim() }];
+  }
+  const speakerMap = {};
+  let order = 0;
+  const out = [];
+  for (const seg of raw) {
+    const rawSpk = pick(seg, ["speaker", "speaker_id", "speakerId", "speaker_label"], "0");
+    const key = String(rawSpk);
+    if (!(key in speakerMap)) { order += 1; speakerMap[key] = `Participant ${order}`; }
+    const text = String(pick(seg, ["text", "transcript", "content"], "") || "").trim();
+    if (!text) continue;
+    out.push({
+      speaker: speakerMap[key],
+      start: parseFloat(pick(seg, ["start", "start_time", "startTime"], 0)) || 0,
+      end: parseFloat(pick(seg, ["end", "end_time", "endTime"], 0)) || 0,
+      text,
+    });
+  }
+  return out;
+}
+
+function extractJSON(raw) {
+  let cleaned = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+  try { return JSON.parse(cleaned); } catch (e) {}
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (match) { try { return JSON.parse(match[0]); } catch (e) {} }
+  throw new Error("La reponse du modele n'a pas pu etre lue (JSON invalide). Vous pouvez relancer.");
+}
+
+// ----------------------------- Rendu transcript -----------------------------
+
+function uniqueSpeakers(segments) {
+  const seen = [];
+  for (const s of segments) if (!seen.includes(s.speaker)) seen.push(s.speaker);
+  return seen;
+}
+
+function renderTranscript() {
+  const view = $("transcriptView");
+  view.innerHTML = "";
+  for (const seg of state.segments) {
+    const div = document.createElement("div");
+    div.className = "seg";
+    div.innerHTML = `<span class="who">${escapeHtml(seg.speaker)}</span> <span class="ts">${formatTimestamp(seg.start)}</span><div>${escapeHtml(seg.text)}</div>`;
+    view.appendChild(div);
+  }
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function transcriptToText(segments) {
+  return segments.map((s) => `${s.speaker}: ${s.text}`).join("\n");
+}
+
+function textToSegments(text, fallback) {
+  const out = [];
+  const re = /^(.*?):\s*(.*)$/;
+  for (let line of text.split("\n")) {
+    line = line.trim();
+    if (!line) continue;
+    const m = line.match(re);
+    if (m) out.push({ speaker: m[1].trim(), start: 0, end: 0, text: m[2].trim() });
+    else if (out.length) out[out.length - 1].text += " " + line;
+  }
+  return out.length ? out : fallback;
+}
+
+// ----------------------------- Export Markdown -----------------------------
+
+function buildMarkdown(segments) {
+  const lines = ["# Transcript de reunion", `*Genere le ${todayFR()}*`, ""];
+  for (const seg of segments) {
+    lines.push(`**[${seg.speaker}]** _(${formatTimestamp(seg.start)})_`);
+    lines.push(seg.text.trim());
+    lines.push("");
+  }
+  return lines.join("\n").trim() + "\n";
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ----------------------------- Export .docx -----------------------------
+
+function buildDocx(report) {
+  const D = window.docx;
+  const accentRun = (text, size, bold) => new D.TextRun({ text, size, bold: bold !== false, color: ACCENT, font: "Calibri" });
+  const plain = (text, opts = {}) => new D.Paragraph({ children: [new D.TextRun({ text: text || "", font: "Calibri", size: 22, ...opts })], spacing: { after: 120 } });
+  const center = D.AlignmentType.CENTER;
+  const thinBorder = { style: D.BorderStyle.SINGLE, size: 2, color: "BFBFBF" };
+  const allBorders = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder, insideHorizontal: thinBorder, insideVertical: thinBorder };
+
+  const children = [];
+
+  // En-tete
+  children.push(new D.Paragraph({ alignment: center, children: [new D.TextRun({ text: HEADER_INSTITUTION, bold: true, color: ACCENT, size: 20, font: "Calibri" })] }));
+  children.push(new D.Paragraph({ alignment: center, children: [accentRun(report.titre || "COMPTE RENDU DE REUNION", 36, true)], spacing: { after: 60 } }));
+  if (report.sous_titre) children.push(new D.Paragraph({ alignment: center, children: [new D.TextRun({ text: report.sous_titre, italics: true, size: 22, font: "Calibri" })], spacing: { after: 200 } }));
+
+  // Tableau metadonnees
+  const meta = [
+    ["Date", report.date || ""],
+    ["Objet", report.objet || ""],
+    ["Participants", (report.participants || []).join("\n")],
+    ["Redacteur ou redactrice", report.redacteur || ""],
+  ];
+  const metaRows = meta.map(([label, value]) => new D.TableRow({
+    children: [
+      new D.TableCell({ width: { size: 30, type: D.WidthType.PERCENTAGE }, children: [new D.Paragraph({ children: [new D.TextRun({ text: label, bold: true, color: ACCENT, font: "Calibri", size: 22 })] })] }),
+      new D.TableCell({ width: { size: 70, type: D.WidthType.PERCENTAGE }, children: (value.split("\n").length ? value.split("\n") : [""]).map((v) => new D.Paragraph({ children: [new D.TextRun({ text: v, font: "Calibri", size: 22 })] })) }),
+    ],
+  }));
+  children.push(new D.Table({ width: { size: 100, type: D.WidthType.PERCENTAGE }, borders: allBorders, rows: metaRows }));
+  children.push(new D.Paragraph({ text: "" }));
+
+  // Sections
+  for (const section of report.sections || []) {
+    children.push(new D.Paragraph({ children: [accentRun(`${section.numero || ""}. ${section.titre || ""}`.trim(), 28, true)], spacing: { before: 200, after: 80 } }));
+    if (section.contenu) children.push(plain(section.contenu));
+    for (const sub of section.sous_sections || []) {
+      children.push(new D.Paragraph({ children: [accentRun(`${sub.numero || ""} ${sub.titre || ""}`.trim(), 24, true)], spacing: { before: 120, after: 60 } }));
+      if (sub.contenu) children.push(plain(sub.contenu));
+    }
+  }
+
+  // Tableau actions
+  const actions = report.actions || [];
+  if (actions.length) {
+    children.push(new D.Paragraph({ children: [accentRun("Decisions et actions", 28, true)], spacing: { before: 240, after: 80 } }));
+    const headerCells = ["Action", "Responsable", "Echeance"].map((t) => new D.TableCell({ shading: { type: D.ShadingType.CLEAR, fill: ACCENT, color: "auto" }, children: [new D.Paragraph({ children: [new D.TextRun({ text: t, bold: true, color: "FFFFFF", font: "Calibri", size: 22 })] })] }));
+    const rows = [new D.TableRow({ children: headerCells })];
+    for (const a of actions) {
+      rows.push(new D.TableRow({ children: [a.action || "", a.responsable || "", a.echeance || ""].map((v) => new D.TableCell({ children: [new D.Paragraph({ children: [new D.TextRun({ text: v, font: "Calibri", size: 22 })] })] })) }));
+    }
+    children.push(new D.Table({ width: { size: 100, type: D.WidthType.PERCENTAGE }, borders: allBorders, rows }));
+  }
+
+  const doc = new D.Document({
+    sections: [{
+      properties: {},
+      footers: { default: new D.Footer({ children: [new D.Paragraph({ alignment: center, children: [new D.TextRun({ text: FOOTER_TEXT, size: 16, color: "808080", font: "Calibri" })] })] }) },
+      children,
+    }],
+  });
+  return D.Packer.toBlob(doc);
+}
+
+// ----------------------------- Prompts -----------------------------
+
+const SPEAKERS_SYSTEM = `Tu analyses le transcript d'une reunion ou les locuteurs sont anonymises sous la forme Participant 1, Participant 2, etc. Ta tache est de deduire, a partir du contenu (presentations, prenoms cites, tours de parole), le nom reel de chaque participant.
+
+Regles strictes :
+- Format de chaque nom : Prenom NOM, le nom de famille entierement en majuscules (exemple : Julien MORICE).
+- Si tu n'es pas certain de l'identite d'un participant, conserve exactement son label d'origine (exemple : Participant 3). N'invente jamais de nom.
+- Reponds uniquement par un objet JSON valide, sans aucun texte autour, sans bloc de code. Les cles sont les labels Participant N, les valeurs sont les noms deduits.
+Exemple de reponse : {"Participant 1": "Julien MORICE", "Participant 2": "Participant 2"}`;
+
+const REPORT_SYSTEM = `Tu rediges un compte rendu de reunion professionnel a partir d'un transcript et de metadonnees fournies.
+
+Exigences de fond :
+- Refleter fidelement le contenu du transcript, sans extrapoler ni inventer.
+- Structurer le compte rendu en sections numerotees (1, 2, 3...), avec des sous-sections numerotees (1.1, 1.2...) lorsque c'est pertinent.
+- La premiere section presente le contexte et les objectifs de la reunion.
+- Les sections suivantes detaillent les points abordes.
+- Terminer par une liste d'actions et decisions (responsable et echeance quand l'information est disponible).
+
+Exigences de forme :
+- Ton professionnel, optimiste et accessible.
+- Ecriture inclusive.
+- N'utilise jamais de tiret long (em dash). Utilise des phrases ou des virgules a la place.
+- Francais correct et soigne.
+
+Tu reponds uniquement par un objet JSON valide conforme au schema, sans aucun texte autour et sans bloc de code. Schema :
+{"titre":"COMPTE RENDU DE REUNION","sous_titre":"...","date":"...","objet":"...","participants":["..."],"redacteur":"...","sections":[{"numero":"1","titre":"...","contenu":"...","sous_sections":[{"numero":"1.1","titre":"...","contenu":"..."}]}],"actions":[{"action":"...","responsable":"...","echeance":"..."}]}
+Le champ sous_sections peut etre une liste vide. Le champ actions peut etre une liste vide s'il n'y a aucune action identifiee.`;
+
+// ----------------------------- Handlers -----------------------------
+
+function refreshKeyGate() {
+  const ok = !!apiKey();
+  $("needKey").classList.toggle("hidden", ok);
+  setStepEnabled("step1", ok);
+}
+
+async function onTranscribe() {
+  const file = $("audioFile").files[0];
+  if (!file) { showMsg("msgTranscribe", "error", "Veuillez d'abord choisir un fichier audio."); return; }
+  showMsg("msgTranscribe", "", "");
+  $("spinTranscribe").classList.add("on");
+  $("btnTranscribe").disabled = true;
+  try {
+    const data = await callTranscription(file, $("lang").value);
+    state.segments = normalizeSegments(data);
+    state.nameMapping = null;
+    state.report = null;
+    renderTranscript();
+    buildNameEditor();
+    $("transcriptEditor").value = transcriptToText(state.segments);
+    refreshParticipantsMeta();
+    setStepEnabled("step2", true);
+    setStepEnabled("step3", true);
+    setStepEnabled("step4", true);
+    setStepEnabled("step5", true);
+    showMsg("msgTranscribe", "ok", "Transcription terminee.");
+  } catch (err) {
+    showMsg("msgTranscribe", "error", humanizeError(err));
+  } finally {
+    $("spinTranscribe").classList.remove("on");
+    $("btnTranscribe").disabled = false;
+  }
+}
+
+function buildNameEditor(mapping) {
+  const speakers = uniqueSpeakers(state.segments);
+  const map = mapping || {};
+  const editor = $("nameEditor");
+  editor.innerHTML = "";
+  for (const sp of speakers) {
+    const row = document.createElement("div");
+    row.className = "name-row";
+    row.innerHTML = `<label style="margin:0">${escapeHtml(sp)}</label>`;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = map[sp] || sp;
+    input.dataset.participant = sp;
+    row.appendChild(input);
+    editor.appendChild(row);
+  }
+}
+
+async function onIdentify() {
+  showMsg("msgIdentify", "", "");
+  $("spinIdentify").classList.add("on");
+  $("btnIdentify").disabled = true;
+  try {
+    const participants = uniqueSpeakers(state.segments);
+    const user = `Participants a identifier : ${participants.join(", ")}.\n\nTranscript :\n${transcriptToText(state.segments)}`;
+    const raw = await callChat([{ role: "system", content: SPEAKERS_SYSTEM }, { role: "user", content: user }], $("chatModel").value, true);
+    const mapping = extractJSON(raw);
+    const clean = {};
+    for (const p of participants) {
+      const v = mapping[p];
+      clean[p] = (typeof v === "string" && v.trim()) ? v.trim() : p;
+    }
+    buildNameEditor(clean);
+    showMsg("msgIdentify", "ok", "Noms proposes. Vous pouvez les corriger ci-dessous.");
+  } catch (err) {
+    showMsg("msgIdentify", "error", humanizeError(err));
+  } finally {
+    $("spinIdentify").classList.remove("on");
+    $("btnIdentify").disabled = false;
+  }
+}
+
+function onApplyNames() {
+  const inputs = $("nameEditor").querySelectorAll("input");
+  const mapping = {};
+  inputs.forEach((i) => { mapping[i.dataset.participant] = i.value.trim() || i.dataset.participant; });
+  state.segments = state.segments.map((s) => ({ ...s, speaker: mapping[s.speaker] || s.speaker }));
+  renderTranscript();
+  buildNameEditor();
+  $("transcriptEditor").value = transcriptToText(state.segments);
+  refreshParticipantsMeta();
+  showMsg("msgIdentify", "ok", "Noms appliques au transcript.");
+}
+
+function syncEditorToState() {
+  state.segments = textToSegments($("transcriptEditor").value, state.segments);
+}
+
+function refreshParticipantsMeta() {
+  const named = uniqueSpeakers(state.segments).filter((s) => !/^participant/i.test(s));
+  $("metaParticipants").value = named.join("\n");
+}
+
+function onDownloadMd() {
+  syncEditorToState();
+  const md = buildMarkdown(state.segments);
+  downloadBlob(new Blob([md], { type: "text/markdown" }), `transcript_${todayCompact()}.md`);
+}
+
+async function onReport() {
+  syncEditorToState();
+  showMsg("msgReport", "", "");
+  $("spinReport").classList.add("on");
+  $("btnReport").disabled = true;
+  try {
+    const participants = $("metaParticipants").value.split("\n").map((s) => s.trim()).filter(Boolean);
+    const dateVal = $("metaDate").value ? $("metaDate").value.split("-").reverse().join("/") : todayFR();
+    const metadata = {
+      objet: $("metaObjet").value,
+      date: dateVal,
+      participants,
+      redacteur: $("metaRedacteur").value,
+      sous_titre: $("metaSousTitre").value,
+    };
+    const user = `Metadonnees de la reunion :\n- Objet : ${metadata.objet}\n- Date : ${metadata.date}\n- Participants : ${participants.join(", ")}\n- Redacteur ou redactrice : ${metadata.redacteur}\n- Sous-titre institutionnel : ${metadata.sous_titre}\n\nTranscript de la reunion :\n${transcriptToText(state.segments)}`;
+    const raw = await callChat([{ role: "system", content: REPORT_SYSTEM }, { role: "user", content: user }], $("chatModel").value, true);
+    const report = extractJSON(raw);
+    report.titre = report.titre || "COMPTE RENDU DE REUNION";
+    report.sous_titre = metadata.sous_titre || report.sous_titre || "";
+    report.date = metadata.date || report.date || "";
+    report.objet = metadata.objet || report.objet || "";
+    report.participants = participants.length ? participants : (report.participants || []);
+    report.redacteur = metadata.redacteur || report.redacteur || "";
+    report.sections = report.sections || [];
+    report.actions = report.actions || [];
+    state.report = report;
+    state.reportObjet = metadata.objet;
+    renderReportPreview(report);
+  } catch (err) {
+    showMsg("msgReport", "error", humanizeError(err));
+  } finally {
+    $("spinReport").classList.remove("on");
+    $("btnReport").disabled = false;
+  }
+}
+
+function renderReportPreview(report) {
+  const el = $("reportPreview");
+  let html = `<h3 style="color:var(--accent)">Apercu du compte rendu</h3>`;
+  html += `<p><strong>${escapeHtml(report.titre || "")}</strong><br /><em>${escapeHtml(report.sous_titre || "")}</em></p>`;
+  html += `<p><strong>Objet :</strong> ${escapeHtml(report.objet || "")}<br /><strong>Date :</strong> ${escapeHtml(report.date || "")}<br /><strong>Participants :</strong> ${escapeHtml((report.participants || []).join(", "))}<br /><strong>Redacteur ou redactrice :</strong> ${escapeHtml(report.redacteur || "")}</p>`;
+  for (const sec of report.sections || []) {
+    html += `<h4>${escapeHtml(sec.numero || "")}. ${escapeHtml(sec.titre || "")}</h4>`;
+    if (sec.contenu) html += `<p>${escapeHtml(sec.contenu)}</p>`;
+    for (const sub of sec.sous_sections || []) {
+      html += `<p><strong>${escapeHtml(sub.numero || "")} ${escapeHtml(sub.titre || "")}</strong><br />${escapeHtml(sub.contenu || "")}</p>`;
+    }
+  }
+  const actions = report.actions || [];
+  if (actions.length) {
+    html += `<h4>Decisions et actions</h4><table class="preview"><tr><th>Action</th><th>Responsable</th><th>Echeance</th></tr>`;
+    for (const a of actions) html += `<tr><td>${escapeHtml(a.action || "")}</td><td>${escapeHtml(a.responsable || "")}</td><td>${escapeHtml(a.echeance || "")}</td></tr>`;
+    html += `</table>`;
+  }
+  html += `<button id="btnDownloadDocx" class="dl">Telecharger le compte rendu (.docx)</button>`;
+  html += `<div class="msg warn">Vous pouvez maintenant telecharger le compte rendu au format .docx, le relire et le modifier selon vos souhaits. L'etape de relecture est essentielle : le systeme peut commettre des erreurs et des imprecisions.</div>`;
+  el.innerHTML = html;
+  $("btnDownloadDocx").addEventListener("click", async () => {
+    const blob = await buildDocx(state.report);
+    const slug = slugify(state.reportObjet || state.report.objet).slice(0, 40);
+    downloadBlob(blob, `CR_${slug}_${todayCompact()}.docx`);
+  });
+}
+
+// ----------------------------- Initialisation -----------------------------
+
+document.addEventListener("DOMContentLoaded", () => {
+  $("metaDate").value = todayISO();
+  refreshKeyGate();
+  $("apiKey").addEventListener("input", refreshKeyGate);
+  $("btnTranscribe").addEventListener("click", onTranscribe);
+  $("btnIdentify").addEventListener("click", onIdentify);
+  $("btnApplyNames").addEventListener("click", onApplyNames);
+  $("btnDownloadMd").addEventListener("click", onDownloadMd);
+  $("btnReport").addEventListener("click", onReport);
+  $("transcriptEditor").addEventListener("change", syncEditorToState);
+});
+</script>
+</body>
+</html>
