@@ -1,4 +1,4 @@
-# Compte rendu de reunion depuis un audio — version statique (GitHub Pages)
+# PracTice Meeting Notes — version statique (GitHub Pages)
 
 Application **100% statique** (HTML/CSS/JavaScript), sans serveur. Elle tourne
 directement dans le navigateur et appelle l'API Mistral cote client.
