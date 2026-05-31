@@ -65,7 +65,9 @@
   .seg { padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
   .seg .who { color: var(--accent); font-weight: 700; font-size: 14px; }
   .seg .ts { color: var(--muted); font-size: 12px; }
-  .name-row { display: grid; grid-template-columns: 160px 1fr; gap: 10px; align-items: center; margin: 6px 0; }
+  .name-row { display: grid; grid-template-columns: 160px 1fr auto; gap: 10px; align-items: center; margin: 6px 0; }
+  .btn-listen { background: #fff; color: var(--accent); border: 1px solid var(--accent); border-radius: 6px; padding: 7px 12px; font-size: 13px; margin: 0; cursor: pointer; white-space: nowrap; }
+  .btn-listen.playing { background: var(--accent); color: #fff; }
   .msg { padding: 12px 14px; border-radius: 8px; font-size: 14px; margin-top: 14px; }
   .msg.info { background: #eef4fb; color: #1c4e80; }
   .msg.warn { background: #fdf3e7; color: #8a5a12; }
@@ -139,6 +141,7 @@
     <!-- Etape 3 -->
     <section class="step disabled" id="step3">
       <h2>3. Identifiez les locuteurs</h2>
+      <p class="caption">Astuce : cliquez sur "Ecouter" en face de chaque participant pour entendre sa premiere prise de parole, et noter son nom sans vous tromper. L'IA peut aussi proposer les noms automatiquement.</p>
       <button id="btnIdentify" class="secondary">Identifier les locuteurs (IA)</button>
       <div class="spinner" id="spinIdentify">Detection des noms par l'IA...</div>
       <div id="msgIdentify"></div>
@@ -192,6 +195,8 @@ const state = {
   nameMapping: null,
   report: null,
   reportObjet: "",
+  audio: null,      // element Audio reutilise pour l'ecoute
+  audioUrl: null,   // object URL du fichier depose (en memoire navigateur)
 };
 
 const $ = (id) => document.getElementById(id);
@@ -506,6 +511,10 @@ async function onTranscribe() {
     state.segments = normalizeSegments(data);
     state.nameMapping = null;
     state.report = null;
+    // Conserve l'audio en memoire pour permettre l'ecoute des prises de parole.
+    if (state.audioUrl) URL.revokeObjectURL(state.audioUrl);
+    state.audioUrl = URL.createObjectURL(file);
+    if (state.audio) state.audio.src = state.audioUrl;
     renderTranscript();
     buildNameEditor();
     $("transcriptEditor").value = transcriptToText(state.segments);
@@ -537,8 +546,61 @@ function buildNameEditor(mapping) {
     input.value = map[sp] || sp;
     input.dataset.participant = sp;
     row.appendChild(input);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-listen";
+    const seg = firstSegmentFor(sp);
+    if (state.audioUrl && seg) {
+      btn.textContent = "▶ Ecouter";
+      btn.title = `Ecouter la premiere prise de parole de ${sp}`;
+      btn.addEventListener("click", () => playClip(seg.start, seg.end, btn));
+    } else {
+      btn.textContent = "▶ Ecouter";
+      btn.disabled = true;
+      btn.title = "Audio indisponible pour l'ecoute";
+    }
+    row.appendChild(btn);
+
     editor.appendChild(row);
   }
+}
+
+function firstSegmentFor(speaker) {
+  return state.segments ? state.segments.find((s) => s.speaker === speaker) : null;
+}
+
+function playClip(start, end, btn) {
+  const a = state.audio;
+  if (!a || !state.audioUrl) return;
+  start = start || 0;
+  // Joue la premiere prise de parole ; si l'horodatage de fin manque, 6 secondes.
+  const stopAt = (end && end > start) ? end : start + 6;
+
+  // Stoppe toute lecture precedente.
+  a.pause();
+  if (a._stopHandler) { a.removeEventListener("timeupdate", a._stopHandler); a._stopHandler = null; }
+  if (a._btn) a._btn.classList.remove("playing");
+
+  const begin = () => {
+    try { a.currentTime = start; } catch (e) {}
+    a._btn = btn || null;
+    if (btn) btn.classList.add("playing");
+    a._stopHandler = () => {
+      if (a.currentTime >= stopAt) {
+        a.pause();
+        a.removeEventListener("timeupdate", a._stopHandler);
+        a._stopHandler = null;
+        if (a._btn) { a._btn.classList.remove("playing"); a._btn = null; }
+      }
+    };
+    a.addEventListener("timeupdate", a._stopHandler);
+    a.addEventListener("ended", () => { if (btn) btn.classList.remove("playing"); }, { once: true });
+    a.play().catch(() => {});
+  };
+
+  if (a.readyState >= 1) begin();
+  else a.addEventListener("loadedmetadata", begin, { once: true });
 }
 
 async function onIdentify() {
@@ -660,6 +722,8 @@ function renderReportPreview(report) {
 // ----------------------------- Initialisation -----------------------------
 
 document.addEventListener("DOMContentLoaded", () => {
+  state.audio = new Audio();
+  state.audio.preload = "metadata";
   $("metaDate").value = todayISO();
   refreshKeyGate();
   $("apiKey").addEventListener("input", refreshKeyGate);

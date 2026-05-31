@@ -15,6 +15,13 @@ L'API Mistral autorise les appels directs depuis un navigateur : elle renvoie
 et de chat. Chaque utilisateur saisit **sa propre cle**, qui reste dans son
 navigateur et n'est envoyee qu'a Mistral.
 
+## Ecoute des prises de parole
+
+A l'etape d'identification, chaque participant dispose d'un bouton "Ecouter" qui
+joue sa premiere prise de parole (grace aux horodatages de la diarisation). Cela
+permet de saisir le bon nom sans se tromper. Le fichier audio reste en memoire du
+navigateur, rien n'est renvoye au serveur.
+
 ## Limites de la version statique
 
 - **Audio uniquement** : mp3, wav, m4a, flac, ogg. Pas de conversion video
