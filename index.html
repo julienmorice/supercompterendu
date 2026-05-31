@@ -128,6 +128,10 @@
   .seg .ts { color: var(--muted); font-size: 12px; }
 
   .name-row { display: grid; grid-template-columns: 170px 1fr auto; gap: 12px; align-items: center; margin: 8px 0; }
+  .key-row { display: flex; gap: 8px; align-items: stretch; }
+  .key-row input { flex: 1; }
+  .key-eye { background: #fff; color: var(--cyan-dark); border: 1.5px solid var(--border); border-radius: 10px; padding: 0 12px; font-size: 12.5px; font-weight: 600; margin: 0; cursor: pointer; box-shadow: none; white-space: nowrap; }
+  .key-eye:hover { background: var(--cyan-soft); border-color: var(--cyan); }
   .btn-listen { background: #fff; color: var(--violet); border: 1.5px solid var(--violet); border-radius: 8px; padding: 8px 13px; font-size: 13px; font-weight: 600; margin: 0; cursor: pointer; white-space: nowrap; box-shadow: none; }
   .btn-listen:hover { background: var(--violet-soft); }
   .btn-listen.playing { background: var(--violet); color: #fff; }
@@ -167,7 +171,12 @@
 
     <p class="kicker">Configuration</p>
     <label for="apiKey">Cle API Mistral</label>
-    <input type="password" id="apiKey" placeholder="Collez votre cle ici" autocomplete="off" />
+    <div class="key-row">
+      <input type="password" id="apiKey" placeholder="Collez votre cle ici" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" />
+      <button type="button" id="btnToggleKey" class="key-eye" title="Afficher ou masquer la cle">Afficher</button>
+    </div>
+    <button type="button" id="btnTestKey" class="secondary" style="margin-top: 8px;">Tester la cle</button>
+    <div id="msgTestKey"></div>
     <p class="caption">Votre cle reste dans votre navigateur. Elle n'est ni stockee, ni journalisee, ni envoyee ailleurs qu'a l'API Mistral.</p>
 
     <label for="lang">Langue de l'audio</label>
@@ -406,6 +415,21 @@ async function callChat(messages, model, jsonMode) {
   return data.choices[0].message.content;
 }
 
+async function callModels() {
+  const res = await fetch(`${API_BASE}/models`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${apiKey()}` },
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    console.error("Mistral /models error", res.status, detail);
+    const e = new Error(`HTTP ${res.status}: ${detail}`);
+    e.status = res.status; e.detail = detail;
+    throw e;
+  }
+  return res.json();
+}
+
 // ----------------------------- Normalisation -----------------------------
 
 function pick(obj, keys, def) {
@@ -608,6 +632,36 @@ function refreshKeyGate() {
   const ok = !!apiKey();
   $("needKey").classList.toggle("hidden", ok);
   setStepEnabled("step1", ok);
+}
+
+function toggleKeyVisibility() {
+  const input = $("apiKey");
+  const btn = $("btnToggleKey");
+  if (input.type === "password") { input.type = "text"; btn.textContent = "Masquer"; }
+  else { input.type = "password"; btn.textContent = "Afficher"; }
+}
+
+async function onTestKey() {
+  if (!apiKey()) { showMsg("msgTestKey", "error", "Saisissez d'abord une cle a tester."); return; }
+  const btn = $("btnTestKey");
+  btn.disabled = true;
+  showMsg("msgTestKey", "info", "Test en cours...");
+  try {
+    const data = await callModels();
+    const ids = (data.data || []).map((m) => m.id || "");
+    const hasVoxtral = ids.some((id) => id.toLowerCase().includes("voxtral"));
+    let text = `Cle valide. ${ids.length} modele(s) accessible(s).`;
+    if (!hasVoxtral) {
+      text += " Attention : aucun modele Voxtral detecte sur ce compte ; la transcription pourrait etre indisponible.";
+      showMsg("msgTestKey", "warn", text);
+    } else {
+      showMsg("msgTestKey", "ok", text);
+    }
+  } catch (err) {
+    showMsg("msgTestKey", "error", humanizeError(err));
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function onTranscribe() {
@@ -837,6 +891,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("metaDate").value = todayISO();
   refreshKeyGate();
   $("apiKey").addEventListener("input", refreshKeyGate);
+  $("btnToggleKey").addEventListener("click", toggleKeyVisibility);
+  $("btnTestKey").addEventListener("click", onTestKey);
   $("btnTranscribe").addEventListener("click", onTranscribe);
   $("btnIdentify").addEventListener("click", onIdentify);
   $("btnApplyNames").addEventListener("click", onApplyNames);
