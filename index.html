@@ -322,17 +322,37 @@ function showMsg(elId, type, text) {
   el.innerHTML = text ? `<div class="msg ${type}">${text}</div>` : "";
 }
 
+function shortDetail(err) {
+  let d = (err && err.detail) || "";
+  // Tente d'extraire un message lisible du corps JSON renvoye par Mistral.
+  try {
+    const j = JSON.parse(d);
+    d = j.message || j.detail || j.error || d;
+    if (typeof d === "object") d = JSON.stringify(d);
+  } catch (e) { /* corps non JSON, on garde tel quel */ }
+  d = String(d).replace(/\s+/g, " ").trim();
+  return d.length > 240 ? d.slice(0, 240) + "..." : d;
+}
+
 function humanizeError(err) {
-  const m = (err && err.message ? err.message : String(err)).toLowerCase();
-  if (m.includes("401") || m.includes("unauthorized") || m.includes("invalid api key"))
-    return "La cle API Mistral semble invalide ou expiree. Verifiez la cle saisie dans la barre laterale.";
-  if (m.includes("429") || m.includes("rate limit") || m.includes("quota") || m.includes("capacity"))
-    return "Quota ou limite de debit Mistral atteint. Patientez quelques instants puis reessayez.";
-  if (m.includes("failed to fetch") || m.includes("network") || m.includes("timeout"))
+  const status = err && err.status;
+  const detail = shortDetail(err);
+  const msg = (err && err.message ? err.message : String(err)).toLowerCase();
+  if (status === 401)
+    return "Authentification refusee par Mistral (HTTP 401). Verifiez que la cle est correcte, complete et sans espace en trop." + (detail ? " Reponse de Mistral : " + detail : "");
+  if (status === 403)
+    return "Acces refuse (HTTP 403). Votre cle n'a peut-etre pas acces a ce modele ou a cette fonctionnalite." + (detail ? " Reponse : " + detail : "");
+  if (status === 429)
+    return "Quota ou limite de debit Mistral atteint (HTTP 429). Patientez quelques instants puis reessayez." + (detail ? " " + detail : "");
+  if (status === 413)
+    return "Le fichier est trop volumineux pour l'API (HTTP 413). Reduisez la duree ou la taille de l'enregistrement.";
+  if (status === 422 || status === 400)
+    return "Requete refusee par Mistral (HTTP " + status + "). Detail : " + (detail || "non precise");
+  if (typeof status === "number" && status >= 500)
+    return "Le service Mistral est momentanement indisponible (HTTP " + status + "). Reessayez dans un instant." + (detail ? " " + detail : "");
+  if (msg.includes("failed to fetch") || msg.includes("network") || msg.includes("timeout"))
     return "Probleme de connexion au service Mistral. Verifiez votre reseau puis reessayez.";
-  if (m.includes("413") || m.includes("too large"))
-    return "Le fichier est trop volumineux pour l'API. Reduisez la duree ou la taille de l'enregistrement.";
-  return "Une erreur est survenue lors de l'appel a Mistral : " + (err.message || err);
+  return "Erreur lors de l'appel a Mistral" + (status ? " (HTTP " + status + ")" : "") + (detail ? " : " + detail : " : " + (err.message || err));
 }
 
 function setStepEnabled(id, enabled) {
@@ -356,7 +376,10 @@ async function callTranscription(file, language) {
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`${res.status} ${detail}`);
+    console.error("Mistral /audio/transcriptions error", res.status, detail);
+    const e = new Error(`HTTP ${res.status}: ${detail}`);
+    e.status = res.status; e.detail = detail;
+    throw e;
   }
   return res.json();
 }
@@ -374,7 +397,10 @@ async function callChat(messages, model, jsonMode) {
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`${res.status} ${detail}`);
+    console.error("Mistral /chat/completions error", res.status, detail);
+    const e = new Error(`HTTP ${res.status}: ${detail}`);
+    e.status = res.status; e.detail = detail;
+    throw e;
   }
   const data = await res.json();
   return data.choices[0].message.content;
