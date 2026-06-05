@@ -226,15 +226,8 @@
 
     <!-- Etape 2 -->
     <section class="step disabled" id="step2">
-      <h2>2. Transcript</h2>
-      <p class="caption">La qualite de l'identification des locuteurs depend de l'enregistrement. Vous pourrez corriger les noms ci-dessous.</p>
-      <div id="transcriptView"></div>
-    </section>
-
-    <!-- Etape 3 -->
-    <section class="step disabled" id="step3">
-      <h2>3. Identifiez les locuteurs</h2>
-      <p class="caption">Astuce : cliquez sur "Ecouter" en face de chaque participant pour entendre sa premiere prise de parole, et noter son nom sans vous tromper. L'IA peut aussi proposer les noms automatiquement.</p>
+      <h2>2. Identifiez les locuteurs</h2>
+      <p class="caption">Ecoutez la premiere prise de parole de chaque participant pour noter son nom, ou laissez l'IA proposer les noms automatiquement.</p>
       <button id="btnIdentify" class="secondary">Identifier les locuteurs (IA)</button>
       <div class="spinner" id="spinIdentify">Detection des noms par l'IA...</div>
       <div id="msgIdentify"></div>
@@ -242,18 +235,18 @@
       <button id="btnApplyNames">Appliquer les noms</button>
     </section>
 
-    <!-- Etape 4 -->
-    <section class="step disabled" id="step4">
-      <h2>4. Relisez, corrigez et exportez le transcript</h2>
-      <p class="caption">Format attendu par ligne : "Nom du locuteur: texte de la prise de parole".</p>
+    <!-- Etape 3 -->
+    <section class="step disabled" id="step3">
+      <h2>3. Corrigez et exportez le transcript</h2>
+      <p class="caption">Format par ligne : "Nom du locuteur: texte". Telechargez le transcript avant de generer le compte rendu.</p>
       <textarea id="transcriptEditor" rows="12"></textarea>
       <br /><button id="btnDownloadMd" class="secondary">Telecharger le transcript (.md)</button>
-      <div class="msg info">Si vous souhaitez uniquement le transcript, vous avez tout ce qu'il faut. La generation d'un compte rendu ci-dessous est optionnelle.</div>
+      <div class="msg info" style="margin-top:12px">Si vous souhaitez uniquement le transcript, vous avez tout ce qu'il faut. La generation d'un compte rendu ci-dessous est optionnelle.</div>
     </section>
 
-    <!-- Etape 5 -->
-    <section class="step disabled" id="step5">
-      <h2>5. Generer un compte rendu structure (optionnel)</h2>
+    <!-- Etape 4 -->
+    <section class="step disabled" id="step4">
+      <h2>4. Generer un compte rendu structure (optionnel)</h2>
       <p class="caption">Certaines personnes se contenteront du transcript. Cette etape est facultative.</p>
       <label for="metaObjet">Objet de la reunion</label>
       <input type="text" id="metaObjet" />
@@ -393,9 +386,10 @@ async function callTranscription(file, language) {
   return res.json();
 }
 
-async function callChat(messages, model, jsonMode) {
+async function callChat(messages, model, jsonMode, maxTokens) {
   const body = { model, messages, temperature: jsonMode ? 0.2 : 0.3 };
   if (jsonMode) body.response_format = { type: "json_object" };
+  if (maxTokens) body.max_tokens = maxTokens;
   const res = await fetch(`${API_BASE}/chat/completions`, {
     method: "POST",
     headers: {
@@ -412,7 +406,14 @@ async function callChat(messages, model, jsonMode) {
     throw e;
   }
   const data = await res.json();
-  return data.choices[0].message.content;
+  const choice = (data.choices && data.choices[0]) || {};
+  const content = (choice.message && choice.message.content) || "";
+  if (choice.finish_reason === "length") {
+    // Reponse tronquee : on renvoie le contenu partiel, extractJSON tentera
+    // de le reparer (fermeture des accolades/crochets).
+    console.warn("Reponse Mistral tronquee (finish_reason=length), tentative de reparation.");
+  }
+  return content;
 }
 
 async function callModels() {
@@ -463,12 +464,57 @@ function normalizeSegments(data) {
   return out;
 }
 
+function repairJSON(text) {
+  // Coupe apres la derniere valeur complete (evite les chaines ouvertes).
+  let s = text.trim();
+  let inString = false, escaped = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (escaped) { escaped = false; continue; }
+    if (c === "\\") { escaped = true; continue; }
+    if (c === '"') inString = !inString;
+  }
+  if (inString) {
+    const last = s.lastIndexOf('"');
+    s = s.slice(0, last).replace(/,\s*$/, "");
+  }
+  // Equilibre les contenants ouverts.
+  const stack = [];
+  inString = false; escaped = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (escaped) { escaped = false; continue; }
+    if (c === "\\") { escaped = true; continue; }
+    if (c === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (c === "{" || c === "[") stack.push(c);
+    else if ((c === "}" || c === "]") && stack.length) stack.pop();
+  }
+  s = s.replace(/,\s*$/, "");
+  while (stack.length) s += stack.pop() === "{" ? "}" : "]";
+  return s;
+}
+
 function extractJSON(raw) {
-  let cleaned = raw.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
-  try { return JSON.parse(cleaned); } catch (e) {}
-  const match = cleaned.match(/\{[\s\S]*\}/);
-  if (match) { try { return JSON.parse(match[0]); } catch (e) {} }
-  throw new Error("La reponse du modele n'a pas pu etre lue (JSON invalide). Vous pouvez relancer.");
+  const text = (raw || "").trim();
+  let cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+  // 1. Parse direct.
+  try { return JSON.parse(cleaned); } catch (_) {}
+  // 2. Extrait le bloc {...}.
+  const first = cleaned.indexOf("{");
+  const last  = cleaned.lastIndexOf("}");
+  if (first >= 0 && last > first) {
+    try { return JSON.parse(cleaned.slice(first, last + 1)); } catch (_) {}
+  }
+  // 3. Reparation d'un JSON tronque.
+  if (first >= 0) {
+    try { return JSON.parse(repairJSON(cleaned.slice(first))); } catch (_) {}
+  }
+  console.error("[PracTice] JSON non parsable. Contenu brut :", raw);
+  throw new Error(
+    "La reponse du modele est illisible (JSON invalide ou incomplet). " +
+    "Relancez la generation. Si l'erreur persiste, essayez mistral-medium-latest ou mistral-small-latest."
+  );
 }
 
 // ----------------------------- Rendu transcript -----------------------------
@@ -679,15 +725,14 @@ async function onTranscribe() {
     if (state.audioUrl) URL.revokeObjectURL(state.audioUrl);
     state.audioUrl = URL.createObjectURL(file);
     if (state.audio) state.audio.src = state.audioUrl;
-    renderTranscript();
     buildNameEditor();
     $("transcriptEditor").value = transcriptToText(state.segments);
     refreshParticipantsMeta();
     setStepEnabled("step2", true);
     setStepEnabled("step3", true);
     setStepEnabled("step4", true);
-    setStepEnabled("step5", true);
-    showMsg("msgTranscribe", "ok", "Transcription terminee.");
+    showMsg("msgTranscribe", "ok", "Transcription terminee. Identifiez maintenant les locuteurs ci-dessous.");
+    $("step2").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (err) {
     showMsg("msgTranscribe", "error", humanizeError(err));
   } finally {
@@ -796,7 +841,6 @@ function onApplyNames() {
   const mapping = {};
   inputs.forEach((i) => { mapping[i.dataset.participant] = i.value.trim() || i.dataset.participant; });
   state.segments = state.segments.map((s) => ({ ...s, speaker: mapping[s.speaker] || s.speaker }));
-  renderTranscript();
   buildNameEditor();
   $("transcriptEditor").value = transcriptToText(state.segments);
   refreshParticipantsMeta();
@@ -834,7 +878,7 @@ async function onReport() {
       sous_titre: $("metaSousTitre").value,
     };
     const user = `Metadonnees de la reunion :\n- Objet : ${metadata.objet}\n- Date : ${metadata.date}\n- Participants : ${participants.join(", ")}\n- Redacteur ou redactrice : ${metadata.redacteur}\n- Sous-titre institutionnel : ${metadata.sous_titre}\n\nTranscript de la reunion :\n${transcriptToText(state.segments)}`;
-    const raw = await callChat([{ role: "system", content: REPORT_SYSTEM }, { role: "user", content: user }], $("chatModel").value, true);
+    const raw = await callChat([{ role: "system", content: REPORT_SYSTEM }, { role: "user", content: user }], $("chatModel").value, true, 8000);
     const report = extractJSON(raw);
     report.titre = report.titre || "COMPTE RENDU DE REUNION";
     report.sous_titre = metadata.sous_titre || report.sous_titre || "";
